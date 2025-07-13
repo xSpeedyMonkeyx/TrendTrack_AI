@@ -4,7 +4,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>f9951795-373b-44b9-ae83-67eca97df8db</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>TrendTrack_AI_Research.py</StartupFile>
+    <StartupFile>test_trends.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -22,6 +22,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="app.py" />
+    <Compile Include="test_trends.py" />
+    <Compile Include="trends_util.py" />
     <Compile Include="TrendTrack_AI_Research.py" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
