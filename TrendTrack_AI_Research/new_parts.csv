@@ -1,4 +1,4 @@
-product_id,product_name,sales,date,forecast,anomaly,z_score,rolling_mean,rolling_std
+product_id,product_name,inventory,date,forecast,anomaly,z_score,rolling_mean,rolling_std
 1345,Test,2.0,2025-07-13,0,False,0,,
 D67920908450,"Fuel Wheels D679 Rebel 20"" 6x139.7 Matte Black",811.0,2025-07-13,0,False,0,,
 D67917908450,"Fuel Wheels D679 Rebel 17"" 6x139.7 Matte Black",618.0,2025-07-13,0,False,0,,
@@ -189,8 +189,8 @@ D57917858345,"Fuel Wheels D579 Vector 17"" 6x139.7 Matte Black",179.0,2025-07-13
 D67918908945,"Fuel Wheels D679 Rebel 18"" 6x135 Matte Black",179.0,2025-07-13,0,False,0,,
 D56720009845,"Fuel Wheels D567 Lethal 20"" 6x135/6x139.7 Matte Black Milled",179.0,2025-07-13,0,False,0,,
 FC860AX17856810N,"Fuel Wheels FC860 Hype 17"" 6x139.7 Battleship Gray",178.0,2025-07-13,0,False,0,,
-D54620902650,"Fuel Wheels D546 Assault 20"" 5x114.3/5x127 Matte Black Milled",178.0,2025-07-13,0,False,0,,
-MR11667001340,"Motegi Cast MR116 FS5 16"" 5x108/5x114.3 Gloss Black W/ Machined Flange",177.0,2025-07-13,0,False,0,,
+D54620902650,"Fuel Wheels D546 Assault 20"" 5x114.3/5x127 Matte Black Milled",0.0,2025-07-13,0,False,0,,
+MR11667001340,"Motegi Cast MR116 FS5 16"" 5x108/5x114.3 Gloss Black W/ Machined Flange",178.0,2025-07-13,0,False,0,,
 MR11667031740,"Motegi Cast MR116 FS5 16"" 5x100/5x114.3 Matte Black W/ Red Stripe",177.0,2025-07-13,0,False,0,,
 D53817909845,"Fuel Wheels D538 Maverick 17"" 6x135/6x139.7 Matte Black Milled",177.0,2025-07-13,0,False,0,,
 D62320009847,"Fuel Wheels D623 Warrior 20"" 6x135/6x139.7 Gloss Black Milled",177.0,2025-07-13,0,False,0,,

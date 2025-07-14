@@ -11,6 +11,7 @@
     <OutputPath>.</OutputPath>
     <Name>TrendTrack_AI_Research</Name>
     <RootNamespace>TrendTrack_AI_Research</RootNamespace>
+    <TestFramework>unittest</TestFramework>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>true</DebugSymbols>
