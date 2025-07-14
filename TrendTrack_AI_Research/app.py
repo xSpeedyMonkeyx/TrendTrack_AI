@@ -1,20 +1,9 @@
-print(">>> ✅ Running the correct app.py!")
-
-
 from pathlib import Path
 import os
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 from trends_util import fetch_trend_data
-
-# Clear Streamlit cache once
-try:
-    from streamlit.runtime.caching import clear_cache
-    clear_cache()
-    print("✅ Streamlit cache cleared from code")
-except Exception as e:
-    print(f"⚠️ Could not clear cache programmatically: {e}")
 
 st.set_page_config(page_title="TrendTrack AI", layout="wide")
 
@@ -31,7 +20,6 @@ if not Path(NEW_PARTS_CSV).exists():
 # Sidebar Navigation
 st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to", ["Dashboard", "Forecasts", "Events/Logs", "Settings"])
-st.sidebar.markdown("👋 Sidebar loaded successfully")  # Debug check
 
 # Initialize session state with persistent parts
 if "new_parts" not in st.session_state:
@@ -50,31 +38,57 @@ df = load_data()
 if not st.session_state.new_parts.empty:
     df = pd.concat([df, st.session_state.new_parts], ignore_index=True)
 
-# Add Part Form
-with st.sidebar.expander("➕ Add New Part"):
-    with st.form("add_part_form"):
-        new_sku = st.text_input("SKU / Part ID")
-        new_name = st.text_input("Part Name")
-        new_qty = st.number_input("Stock Level", min_value=0, step=1)
-        submit = st.form_submit_button("Add Part")
+# ADD PART FORM
+st.sidebar.subheader("➕ Add New Part")
+with st.sidebar.form("add_part_form"):
+    new_sku = st.text_input("SKU / Part ID")
+    new_name = st.text_input("Part Name")
+    new_qty = st.number_input("Stock Level", min_value=0, step=1)
+    submit = st.form_submit_button("Add Part")
 
-    if submit:
-        new_row = pd.DataFrame([{
-            "product_id": new_sku,
-            "product_name": new_name,
-            "sales": new_qty,
-            "date": pd.to_datetime("today").normalize(),
-            "forecast": 0,
-            "anomaly": False,
-            "z_score": 0,
-            "rolling_mean": None,
-            "rolling_std": None
-        }])
-        st.session_state.new_parts = pd.concat([st.session_state.new_parts, new_row], ignore_index=True)
+if submit:
+    new_row = pd.DataFrame([{
+        "product_id": new_sku,
+        "product_name": new_name,
+        "sales": new_qty,
+        "date": pd.to_datetime("today").normalize(),
+        "forecast": 0,
+        "anomaly": False,
+        "z_score": 0,
+        "rolling_mean": None,
+        "rolling_std": None
+    }])
+    st.session_state.new_parts = pd.concat([st.session_state.new_parts, new_row], ignore_index=True)
+    st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
+    st.success(f"✅ Part {new_sku} added!")
+
+# --- CSV UPLOAD ---
+st.sidebar.subheader("📁 Upload CSV File")
+uploaded_csv = st.sidebar.file_uploader("Upload a CSV of parts", type=["csv"])
+
+if uploaded_csv:
+    uploaded_df = pd.read_csv(uploaded_csv)
+    st.sidebar.markdown("### Map CSV Columns")
+    sku_col = st.sidebar.selectbox("Select SKU Column", uploaded_df.columns)
+    name_col = st.sidebar.selectbox("Select Part Name Column", uploaded_df.columns)
+    qty_col = st.sidebar.selectbox("Select Stock Level Column", uploaded_df.columns)
+
+    if st.sidebar.button("Add Parts from CSV"):
+        imported_rows = uploaded_df[[sku_col, name_col, qty_col]].copy()
+        imported_rows.columns = ["product_id", "product_name", "sales"]
+        imported_rows["date"] = pd.to_datetime("today").normalize()
+        imported_rows["forecast"] = 0
+        imported_rows["anomaly"] = False
+        imported_rows["z_score"] = 0
+        imported_rows["rolling_mean"] = None
+        imported_rows["rolling_std"] = None
+
+        st.session_state.new_parts = pd.concat([st.session_state.new_parts, imported_rows], ignore_index=True)
         st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
-        st.success(f"✅ Part {new_sku} added!")
+        st.success(f"✅ {len(imported_rows)} parts added from CSV!")
+        st.dataframe(imported_rows)
 
-# Main Page Layout
+# MAIN PAGE LOGIC
 if page == "Dashboard":
     st.title("📦 TrendTrack AI Inventory Dashboard")
     st.subheader("SKU Overview")
@@ -82,14 +96,17 @@ if page == "Dashboard":
     if df.empty:
         st.warning("No data loaded. Run the forecast model to generate results.")
     else:
+        # Summary Cards
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Total SKUs Tracked", df['product_id'].nunique())
         col2.metric("Detected Anomalies", int(df['anomaly'].sum()))
         col3.metric("Average Forecasted Sales", round(df['forecast'].mean(), 2))
         col4.metric("At-Risk Stockouts", df[df['forecast'] < df['sales']].shape[0])
 
+        # Data Table
         st.dataframe(df.head(20), use_container_width=True)
 
+        # Sales vs Forecast Plot
         st.subheader("Forecast vs Actual Sales")
         fig, ax = plt.subplots(figsize=(10, 4))
         ax.plot(df["date"], df["sales"], label="Actual Sales", color="blue")
@@ -103,6 +120,7 @@ if page == "Dashboard":
         ax.grid(True)
         st.pyplot(fig)
 
+        # Google Trends Plot
         st.subheader("Google Trends for SKU: CTS-INT-58")
         trends_df = fetch_trend_data("CTS-INT-58")
         if not trends_df.empty:
