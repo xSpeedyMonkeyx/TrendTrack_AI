@@ -1,16 +1,38 @@
-from pytrends.request import TrendReq
+﻿from pytrends.request import TrendReq
 import pandas as pd
+import time
+from datetime import datetime, timedelta
+import os
 
-def fetch_trend_data(keyword: str, start_date: str = "2024-01-01", end_date: str = "2024-06-30") -> pd.DataFrame:
+FALLBACK_DIR = "fallback_trends"
+
+def fetch_trend_data(keyword: str, months_back: int = 6) -> pd.DataFrame:
     try:
+        time.sleep(2)  # time delay to lessen 429'd
+        end_date = datetime.today()
+        start_date = end_date - timedelta(days=30 * months_back)
+        timeframe = f"{start_date.strftime('%Y-%m-%d')} {end_date.strftime('%Y-%m-%d')}"
+
         pytrends = TrendReq(hl='en-US', tz=360)
-        pytrends.build_payload([keyword], cat=0, timeframe=f"{start_date} {end_date}")
+        pytrends.build_payload([keyword], cat=0, timeframe=timeframe)
         data = pytrends.interest_over_time()
 
         if not data.empty and keyword in data.columns:
             return data[[keyword]]
-        else:
-            return pd.DataFrame()
-    except Exception:
-        # Handle failed fetches
+
+        raise ValueError("Empty data returned from Google Trends.")
+
+    except Exception as e:
+        print(f"⚠️ Google Trends fetch failed for {keyword}: {e}")
+
+        # Try fallback
+        fallback_file = os.path.join(FALLBACK_DIR, f"{keyword}.csv")
+        if os.path.exists(fallback_file):
+            try:
+                fallback_data = pd.read_csv(fallback_file, parse_dates=True, index_col=0)
+                print(f"ℹ️ Loaded fallback trends for {keyword} from {fallback_file}")
+                return fallback_data
+            except Exception as fallback_error:
+                print(f"❌ Failed to load fallback data for {keyword}: {fallback_error}")
+
         return pd.DataFrame()

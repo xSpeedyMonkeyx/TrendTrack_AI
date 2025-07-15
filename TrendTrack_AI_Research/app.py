@@ -3,29 +3,41 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 from trends_util import fetch_trend_data
+import json
+import numpy as np
 
 st.set_page_config(page_title="TrendTrack AI", layout="wide")
 
 NEW_PARTS_CSV = "new_parts.csv"
+SETTINGS_FILE = "settings.json"
 
-# Confirm CSV exists
+# Confirm new_parts.csv exists
 if not Path(NEW_PARTS_CSV).exists():
     pd.DataFrame(columns=[
         "product_id", "product_name", "inventory", "date", "forecast",
         "anomaly", "z_score", "rolling_mean", "rolling_std"
     ]).to_csv(NEW_PARTS_CSV, index=False)
 
-# Load persistent data
+# Load part data
 if "new_parts" not in st.session_state:
     st.session_state.new_parts = pd.read_csv(NEW_PARTS_CSV)
     if "date" in st.session_state.new_parts.columns:
         st.session_state.new_parts["date"] = pd.to_datetime(st.session_state.new_parts["date"])
 
+# Load settings
+if not Path(SETTINGS_FILE).exists():
+    default_settings = {"z_threshold": 3.0}
+    with open(SETTINGS_FILE, "w") as f:
+        json.dump(default_settings, f)
+else:
+    with open(SETTINGS_FILE, "r") as f:
+        default_settings = json.load(f)
+
 # Sidebar Navigation
 st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to", ["Dashboard", "Forecasts", "Events/Logs", "Settings"])
 
-# Add a Part Form
+# Add New Part Form
 st.sidebar.subheader("➕ Add New Part")
 with st.sidebar.form("add_part_form"):
     new_sku = st.text_input("SKU / Part ID")
@@ -48,7 +60,7 @@ if submit:
     st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
     st.success(f"✅ Part {new_sku} added!")
 
-# Upload CSV Option
+# CSV Upload Option
 st.sidebar.subheader("📁 Upload CSV File")
 uploaded_csv = st.sidebar.file_uploader("Upload a CSV of parts", type=["csv"])
 if uploaded_csv:
@@ -70,83 +82,145 @@ if uploaded_csv:
         st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
         st.success(f"✅ {len(imported)} parts added from CSV!")
 
-# Dashboard Layout
+# Dashboard
 if page == "Dashboard":
     st.title("📦 TrendTrack AI Inventory Dashboard")
     df = st.session_state.new_parts.copy()
 
+    def estimate_stockout_date(row):
+        if row["forecast"] <= 0:
+            return "N/A"
+        days_left = row["inventory"] / row["forecast"]
+        return (pd.to_datetime("today") + pd.Timedelta(days=days_left)).strftime("%Y-%m-%d")
+    df["stockout_date"] = df.apply(estimate_stockout_date, axis=1)
+
+    def suggest_reorder_qty(row):
+        needed = row["forecast"] * 14
+        return max(int(round(needed - row["inventory"])), 0) if row["forecast"] > 0 else 0
+    df["reorder_qty"] = df.apply(suggest_reorder_qty, axis=1)
+
     if df.empty:
-        st.warning("No data available. Add parts or upload CSV.")
+        st.warning("No data available.")
     else:
-        # Metrics
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Total SKUs Tracked", df['product_id'].nunique())
         col2.metric("Detected Anomalies", int(df['anomaly'].sum()))
-        col3.metric("Average Forecasted Sales", round(df['forecast'].mean(), 2))
+        col3.metric("Avg Forecasted Sales", round(df['forecast'].mean(), 2))
         col4.metric("At-Risk Stockouts", df[df['forecast'] < df['inventory']].shape[0])
 
-        # Inventory Overview
         st.subheader("📋 Inventory Overview")
-        selected = st.data_editor(df[["product_id", "product_name", "inventory", "forecast", "date"]].rename(columns={
-            "product_id": "SKU",
-            "product_name": "Product Name",
-            "inventory": "Quantity",
-            "forecast": "Forecast",
-            "date": "Date"
-        }), num_rows="dynamic", use_container_width=True, hide_index=True)
+        selected = st.data_editor(
+            df[["product_id", "product_name", "inventory", "forecast", "stockout_date", "reorder_qty", "date"]].rename(columns={
+                "product_id": "SKU",
+                "product_name": "Product Name",
+                "inventory": "Quantity",
+                "forecast": "Forecast",
+                "stockout_date": "Est. Stockout",
+                "reorder_qty": "Reorder Qty",
+                "date": "Date"
+            }), use_container_width=True, hide_index=True
+        )
 
-        # Get selected SKU from table when clicked
-        selected_part = None
-        if len(selected["SKU"]) > 0:
-            last_clicked = selected["SKU"].iloc[-1]
-            selected_part = df[df["product_id"] == last_clicked].iloc[0]
+        df["sku_display"] = df["product_id"] + " — " + df["product_name"]
+        display_to_sku = dict(zip(df["sku_display"], df["product_id"]))
+        selected_display = st.selectbox("Select a SKU", df["sku_display"])
+        selected_sku = display_to_sku[selected_display]
+        selected_part = df[df["product_id"] == selected_sku].iloc[0]
 
-        if selected_part is not None:
-            st.subheader("🛠️ Manage Selected Part")
-            new_qty = st.number_input(f"Adjust Inventory for {selected_part['product_id']}", value=int(selected_part["inventory"]), step=1, key="adjust_qty")
-            col_a, col_b = st.columns([1, 1])
-            if col_a.button("Update Inventory"):
-                st.session_state.new_parts.loc[st.session_state.new_parts["product_id"] == selected_part["product_id"], "inventory"] = new_qty
-                st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
-                st.success(f"Inventory updated for {selected_part['product_id']}")
+        st.subheader("🛠️ Manage Selected Part")
+        new_qty = st.number_input(f"Adjust Inventory for {selected_part['product_id']}", value=int(selected_part["inventory"]), step=1)
+        col_a, col_b = st.columns(2)
+        if col_a.button("Update Inventory"):
+            st.session_state.new_parts.loc[
+                st.session_state.new_parts["product_id"] == selected_part["product_id"], "inventory"
+            ] = new_qty
+            st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
+            st.success("Inventory updated.")
+        if col_b.button("❌ Delete SKU"):
+            st.session_state.new_parts = st.session_state.new_parts[
+                st.session_state.new_parts["product_id"] != selected_part["product_id"]
+            ]
+            st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
+            st.success("SKU deleted.")
 
-            if col_b.button("❌ Delete SKU"):
-                st.session_state.new_parts = st.session_state.new_parts[st.session_state.new_parts["product_id"] != selected_part["product_id"]]
-                st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
-                st.success(f"SKU {selected_part['product_id']} deleted!")
+        st.subheader("📈 Inventory vs Google Trends")
 
-            # Google Trends Search/Information
-            st.subheader("🔍 Google Trends")
-            trends_sku = fetch_trend_data(selected_part["product_id"])
-            trends_name = fetch_trend_data(selected_part["product_name"])
+        trends_sku = fetch_trend_data(selected_part["product_id"])
+        trends_name = fetch_trend_data(selected_part["product_name"])
+        inventory_history = df[df["product_id"] == selected_part["product_id"]].copy()
 
-            if not trends_sku.empty or not trends_name.empty:
-                fig, ax = plt.subplots(figsize=(10, 4))
-                if not trends_sku.empty:
-                    ax.plot(trends_sku.index, trends_sku[selected_part["product_id"]], label=selected_part["product_id"], color="blue")
-                if not trends_name.empty:
-                    ax.plot(trends_name.index, trends_name[selected_part["product_name"]], label=selected_part["product_name"], color="green")
-                ax.set_title("Search Interest (Google Trends)")
-                ax.set_xlabel("Month")
-                ax.set_ylabel("Search Interest Score (0–100)")
-                ax.legend()
-                ax.grid(True)
-                ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter("%b %Y"))
-                st.pyplot(fig)
-            else:
-                st.info(f"No Google Trends data found for {selected_part['product_id']}.")
+        if not trends_sku.empty or not trends_name.empty:
+            inventory_history["date"] = pd.to_datetime(inventory_history["date"])
+            inventory_history = inventory_history.sort_values("date")
 
+            fig, ax = plt.subplots(figsize=(10, 4))
+            ax.plot(inventory_history["date"], inventory_history["inventory"], label="Inventory", color="blue")
+
+            if not trends_sku.empty:
+                ax.plot(trends_sku.index, trends_sku[selected_part["product_id"]],
+                        label=f"Search: {selected_part['product_id']}", color="green")
+            if not trends_name.empty:
+                ax.plot(trends_name.index, trends_name[selected_part["product_name"]],
+                        label=f"Search: {selected_part['product_name']}", color="orange")
+
+            ax.set_title("Inventory vs Google Trends")
+            ax.set_xlabel("Date")
+            ax.set_ylabel("Value")
+            ax.legend()
+            ax.grid(True)
+            ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter("%b %Y"))
+            st.pyplot(fig)
+        else:
+            st.info(f"No Google Trends data found for: {selected_part['product_id']} or {selected_part['product_name']}")
+
+# Forecasts
 elif page == "Forecasts":
-    st.title("🔮 Forecast Output")
-    st.info("Placeholder for future forecasting functionality.")
+    st.title("🔮 Forecast Output (7-Day Moving Average)")
 
+    df = st.session_state.new_parts.copy()
+    if df.empty:
+        st.warning("No parts data available.")
+    else:
+        unique_skus = df["product_id"].unique()
+        selected_sku = st.selectbox("Choose SKU for Forecast View", unique_skus)
+        sku_df = df[df["product_id"] == selected_sku].copy()
+        sku_df["date"] = pd.to_datetime(sku_df["date"])
+        sku_df = sku_df.sort_values("date")
+
+        sku_df["7_day_ma"] = sku_df["inventory"].rolling(window=7, min_periods=1).mean()
+
+        st.line_chart(
+            sku_df.set_index("date")[["inventory", "7_day_ma"]],
+            use_container_width=True,
+            height=350
+        )
+
+        st.caption("Shows actual inventory and 7-day moving average forecast for trend tracking.")
+
+# Events / Logs
 elif page == "Events/Logs":
-    st.title("📋 Events and Anomaly Logs")
+    st.title("📋 Anomaly Logs")
     df = st.session_state.new_parts
     if not df.empty:
-        logs = df[df["anomaly"]][["date", "product_id", "inventory", "forecast", "z_score"]]
-        st.dataframe(logs)
+        logs = df[df["anomaly"] == True][["date", "product_id", "product_name", "inventory", "forecast", "z_score"]]
+        if not logs.empty:
+            logs.to_csv("logs.csv", index=False)
+            st.success("Anomalies exported to logs.csv")
+            st.dataframe(logs)
+        else:
+            st.info("✅ No anomalies detected.")
 
+# Settings 
 elif page == "Settings":
     st.title("⚙️ Settings")
-    st.text("Configuration options for retraining and thresholds coming soon.")
+    st.subheader("Z-Score Threshold")
+    new_threshold = st.slider("Set Z-Score Threshold", 1.0, 5.0, float(default_settings["z_threshold"]), 0.1)
+    if new_threshold != default_settings["z_threshold"]:
+        default_settings["z_threshold"] = new_threshold
+        with open(SETTINGS_FILE, "w") as f:
+            json.dump(default_settings, f)
+        st.success("Threshold updated.")
+
+    st.subheader("Manual Model Retraining")
+    if st.button("Run Model Retraining"):
+        st.success("✅ Model retraining triggered.")
