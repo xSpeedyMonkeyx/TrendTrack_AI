@@ -82,6 +82,24 @@ if uploaded_csv:
         st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
         st.success(f"✅ {len(imported)} parts added from CSV!")
 
+        st.sidebar.markdown("---")
+st.sidebar.markdown("#### 🚨 Danger Zone: Delete All Parts")
+st.sidebar.warning("This will permanently delete all SKU's from your inventory.")
+
+delete_confirm = st.sidebar.text_input("Type 'confirm' to enable delete", key="delete_all_confirm")
+delete_clicked = st.sidebar.button("🗑️ Delete ALL SKU's", type="primary")
+
+if delete_clicked:
+    if delete_confirm.strip().lower() == "confirm":
+        st.session_state.new_parts = pd.DataFrame(columns=[
+            "product_id", "product_name", "inventory", "date", "forecast",
+            "anomaly", "z_score", "rolling_mean", "rolling_std"
+        ])
+        st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
+        st.sidebar.success("✅ All SKU's have been deleted")
+    else:
+        st.sidebar.error("❌ Type 'confirm' to proceed with deleting all SKU's")
+
 # Dashboard
 if page == "Dashboard":
     st.title("📦 TrendTrack AI Inventory Dashboard")
@@ -92,12 +110,17 @@ if page == "Dashboard":
             return "N/A"
         days_left = row["inventory"] / row["forecast"]
         return (pd.to_datetime("today") + pd.Timedelta(days=days_left)).strftime("%Y-%m-%d")
-    df["stockout_date"] = df.apply(estimate_stockout_date, axis=1)
 
     def suggest_reorder_qty(row):
         needed = row["forecast"] * 14
         return max(int(round(needed - row["inventory"])), 0) if row["forecast"] > 0 else 0
-    df["reorder_qty"] = df.apply(suggest_reorder_qty, axis=1)
+
+    if not df.empty:
+        df["stockout_date"] = df.apply(estimate_stockout_date, axis=1)
+        df["reorder_qty"] = df.apply(suggest_reorder_qty, axis=1)
+    else:
+        df["stockout_date"] = []
+        df["reorder_qty"] = []
 
     if df.empty:
         st.warning("No data available.")
@@ -142,6 +165,7 @@ if page == "Dashboard":
             ]
             st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
             st.success("SKU deleted.")
+                   
 
         st.subheader("📈 Inventory vs Google Trends")
 
