@@ -15,12 +15,14 @@ SETTINGS_FILE = "settings.json"
 if not Path(NEW_PARTS_CSV).exists():
     pd.DataFrame(columns=[
         "product_id", "product_name", "inventory", "date", "forecast",
-        "anomaly", "z_score", "rolling_mean", "rolling_std"
+        "anomaly", "z_score", "rolling_mean", "rolling_std", "category"
     ]).to_csv(NEW_PARTS_CSV, index=False)
 
 # Load part data
 if "new_parts" not in st.session_state:
     st.session_state.new_parts = pd.read_csv(NEW_PARTS_CSV)
+    if "category" not in st.session_state.new_parts.columns:
+        st.session_state.new_parts["category"] = "Uncategorized"
     if "date" in st.session_state.new_parts.columns:
         st.session_state.new_parts["date"] = pd.to_datetime(st.session_state.new_parts["date"])
 
@@ -43,7 +45,9 @@ with st.sidebar.form("add_part_form"):
     new_sku = st.text_input("SKU / Part ID")
     new_name = st.text_input("Part Name")
     new_qty = st.number_input("Inventory", min_value=0, step=1)
+    new_category = st.text_input("Category")
     submit = st.form_submit_button("Add Part")
+    
 if submit:
     new_row = pd.DataFrame([{
         "product_id": new_sku,
@@ -54,7 +58,8 @@ if submit:
         "anomaly": False,
         "z_score": 0,
         "rolling_mean": None,
-        "rolling_std": None
+        "rolling_std": None,
+        "category": new_category
     }])
     st.session_state.new_parts = pd.concat([st.session_state.new_parts, new_row], ignore_index=True)
     st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
@@ -78,6 +83,7 @@ if uploaded_csv:
         imported["z_score"] = 0
         imported["rolling_mean"] = None
         imported["rolling_std"] = None
+        imported["category"] = "Uncategorized"
         st.session_state.new_parts = pd.concat([st.session_state.new_parts, imported], ignore_index=True)
         st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
         st.success(f"✅ {len(imported)} parts added from CSV!")
@@ -131,9 +137,23 @@ if page == "Dashboard":
         col3.metric("Avg Forecasted Sales", round(df['forecast'].mean(), 2))
         col4.metric("At-Risk Stockouts", df[df['forecast'] < df['inventory']].shape[0])
 
+        #Category Filter
+        with st.expander("🔍 Filter Inventory by Category", expanded=False):
+            unique_categories = df["category"].dropna().unique()
+            if len(unique_categories) > 0:
+                selected_category = st.selectbox("Select Category", unique_categories)
+                if st.button("Apply Filter"):
+                    st.session_state.filtered_df = df[df["category"] == selected_category]
+                if st.button("Clear Filter"):
+                    st.session_state.pop("filtered_df", None)
+            else:
+                st.write("No categories available.")
+
+        source_df = st.session_state.get("filtered_df", df)
+
         st.subheader("📋 Inventory Overview")
         selected = st.data_editor(
-            df[["product_id", "product_name", "inventory", "forecast", "stockout_date", "reorder_qty", "date"]].rename(columns={
+            source_df[["product_id", "product_name", "inventory", "forecast", "stockout_date", "reorder_qty", "date"]].rename(columns={
                 "product_id": "SKU",
                 "product_name": "Product Name",
                 "inventory": "Quantity",
@@ -144,9 +164,9 @@ if page == "Dashboard":
             }), use_container_width=True, hide_index=True
         )
 
-        df["sku_display"] = df["product_id"] + " — " + df["product_name"]
-        display_to_sku = dict(zip(df["sku_display"], df["product_id"]))
-        selected_display = st.selectbox("Select a SKU", df["sku_display"])
+        source_df["sku_display"] = source_df["product_id"] + " — " + source_df["product_name"]
+        display_to_sku = dict(zip(source_df["sku_display"], source_df["product_id"]))
+        selected_display = st.selectbox("Select a SKU", source_df["sku_display"])
         selected_sku = display_to_sku[selected_display]
         selected_part = df[df["product_id"] == selected_sku].iloc[0]
 
