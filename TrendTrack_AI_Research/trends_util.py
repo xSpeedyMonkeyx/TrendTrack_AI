@@ -5,10 +5,12 @@ from datetime import datetime, timedelta
 import os
 
 FALLBACK_DIR = "fallback_trends"
+os.makedirs(FALLBACK_DIR, exist_ok=True)
+
 
 def fetch_trend_data(keyword: str, months_back: int = 6) -> pd.DataFrame:
     try:
-        time.sleep(2)  # time delay to lessen 429'd
+        time.sleep(2)  # reduce chance of 429
         end_date = datetime.today()
         start_date = end_date - timedelta(days=30 * months_back)
         timeframe = f"{start_date.strftime('%Y-%m-%d')} {end_date.strftime('%Y-%m-%d')}"
@@ -18,6 +20,11 @@ def fetch_trend_data(keyword: str, months_back: int = 6) -> pd.DataFrame:
         data = pytrends.interest_over_time()
 
         if not data.empty and keyword in data.columns:
+            # Save to fallback for future use
+            os.makedirs(FALLBACK_DIR, exist_ok=True)
+            fallback_path = os.path.join(FALLBACK_DIR, f"{keyword}.csv")
+            data[[keyword]].to_csv(fallback_path)
+            print(f"💾 Cached Google Trends data to {fallback_path}")
             return data[[keyword]]
 
         raise ValueError("Empty data returned from Google Trends.")

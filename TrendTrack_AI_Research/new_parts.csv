@@ -1,2 +1,4 @@
-product_id,product_name,inventory,date,forecast,anomaly,z_score,rolling_mean,rolling_std
-S10590XL,STP Extended Life Spin-On Canister Engine Oil Filter,1,2025-07-19,0,False,0,,
+product_id,product_name,inventory,date,forecast,anomaly,z_score,rolling_mean,rolling_std,category
+S10590XL,STP Extended Life Spin-On Canister Engine Oil Filter,1,2025-07-19,0,False,0,,,Uncategorized
+49883,Air Filter Panel,2,2025-07-21,0,False,0,,,Air Intake
+93501,NGK IX Iridium Spark Plug,4,2025-07-21,0,False,0,,,Engine
