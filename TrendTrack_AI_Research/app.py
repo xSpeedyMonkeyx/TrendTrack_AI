@@ -6,6 +6,14 @@ from trends_util import fetch_trend_data
 import json
 import numpy as np
 
+CATEGORY_OPTIONS = [
+    "AC And Climate Control", "Air Intake", "Brake", "Car Care And Detailing",
+    "Clutch And Flywheel", "Cooling System", "Drivetrain And Axle", "Engine",
+    "Exhaust", "Exterior Body", "Fuel System", "Interior Body",
+    "Merchandise And Accessories", "Steering", "Supplies And Hardware",
+    "Suspension", "Tools", "Transmission"
+]
+
 st.set_page_config(page_title="TrendTrack AI", layout="wide")
 
 NEW_PARTS_CSV = "new_parts.csv"
@@ -45,7 +53,7 @@ with st.sidebar.form("add_part_form"):
     new_sku = st.text_input("SKU / Part ID")
     new_name = st.text_input("Part Name")
     new_qty = st.number_input("Inventory", min_value=0, step=1)
-    new_category = st.text_input("Category")
+    new_category = st.selectbox("Category", CATEGORY_OPTIONS)
     submit = st.form_submit_button("Add Part")
     
 if submit:
@@ -89,6 +97,8 @@ if uploaded_csv:
         st.success(f"✅ {len(imported)} parts added from CSV!")
 
         st.sidebar.markdown("---")
+
+#Delete all SKU's option
 st.sidebar.markdown("#### 🚨 Danger Zone: Delete All Parts")
 st.sidebar.warning("This will permanently delete all SKU's from your inventory.")
 
@@ -99,7 +109,7 @@ if delete_clicked:
     if delete_confirm.strip().lower() == "confirm":
         st.session_state.new_parts = pd.DataFrame(columns=[
             "product_id", "product_name", "inventory", "date", "forecast",
-            "anomaly", "z_score", "rolling_mean", "rolling_std"
+            "anomaly", "z_score", "rolling_mean", "rolling_std", "category"
         ])
         st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
         st.sidebar.success("✅ All SKU's have been deleted")
@@ -114,12 +124,10 @@ if page == "Dashboard":
     def estimate_stockout_date(row):
         if row["forecast"] <= 0:
             return "N/A"
-        days_left = row["inventory"] / row["forecast"]
-        return (pd.to_datetime("today") + pd.Timedelta(days=days_left)).strftime("%Y-%m-%d")
+        return (pd.to_datetime("today") + pd.Timedelta(days=row["inventory"] / row["forecast"])).strftime("%Y-%m-%d")
 
     def suggest_reorder_qty(row):
-        needed = row["forecast"] * 14
-        return max(int(round(needed - row["inventory"])), 0) if row["forecast"] > 0 else 0
+        return max(int(round(row["forecast"] * 14 - row["inventory"])), 0) if row["forecast"] > 0 else 0
 
     if not df.empty:
         df["stockout_date"] = df.apply(estimate_stockout_date, axis=1)
@@ -137,22 +145,11 @@ if page == "Dashboard":
         col3.metric("Avg Forecasted Sales", round(df['forecast'].mean(), 2))
         col4.metric("At-Risk Stockouts", df[df['forecast'] < df['inventory']].shape[0])
 
-        #Category Filter
-        with st.expander("🔍 Filter Inventory by Category", expanded=False):
-            unique_categories = df["category"].dropna().unique()
-            if len(unique_categories) > 0:
-                selected_category = st.selectbox("Select Category", unique_categories)
-                if st.button("Apply Filter"):
-                    st.session_state.filtered_df = df[df["category"] == selected_category]
-                if st.button("Clear Filter"):
-                    st.session_state.pop("filtered_df", None)
-            else:
-                st.write("No categories available.")
-
-        source_df = st.session_state.get("filtered_df", df)
 
         st.subheader("📋 Inventory Overview")
-        selected = st.data_editor(
+        source_df = st.session_state.get("filtered_df", df)
+
+        st.data_editor(
             source_df[["product_id", "product_name", "inventory", "forecast", "stockout_date", "reorder_qty", "date"]].rename(columns={
                 "product_id": "SKU",
                 "product_name": "Product Name",
@@ -163,6 +160,21 @@ if page == "Dashboard":
                 "date": "Date"
             }), use_container_width=True, hide_index=True
         )
+        
+
+
+        # Category Filter
+        with st.expander("🔍 Filter Inventory by Category", expanded=False):
+            unique_categories = df["category"].dropna().unique()
+            
+            if len(unique_categories) > 0:
+                selected_category = st.selectbox("Select Category", unique_categories)
+                if st.button("Apply Filter"):
+                    st.session_state.filtered_df = df[df["category"] == selected_category]
+                if st.button("Clear Filter"):
+                    st.session_state.pop("filtered_df", None)
+            else:
+                st.write("No categories available.")
 
         source_df["sku_display"] = source_df["product_id"] + " — " + source_df["product_name"]
         display_to_sku = dict(zip(source_df["sku_display"], source_df["product_id"]))
@@ -185,7 +197,6 @@ if page == "Dashboard":
             ]
             st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
             st.success("SKU deleted.")
-                   
 
         st.subheader("📈 Inventory vs Google Trends")
 
