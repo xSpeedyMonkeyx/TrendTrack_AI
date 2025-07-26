@@ -23,7 +23,7 @@ def fetch_trend_data(keyword: str, months_back: int = 6) -> pd.DataFrame:
             # Save to fallback for future use
             os.makedirs(FALLBACK_DIR, exist_ok=True)
             fallback_path = os.path.join(FALLBACK_DIR, f"{keyword}.csv")
-            data[[keyword]].to_csv(fallback_path)
+            data[[keyword]].to_csv(fallback_path) #save trend results to local CSV
             print(f"💾 Cached Google Trends data to {fallback_path}")
             return data[[keyword]]
 

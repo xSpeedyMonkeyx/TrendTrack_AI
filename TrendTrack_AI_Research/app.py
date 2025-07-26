@@ -70,6 +70,10 @@ if submit:
         "category": new_category
     }])
     st.session_state.new_parts = pd.concat([st.session_state.new_parts, new_row], ignore_index=True)
+
+    st.session_state.new_parts["inventory"] = pd.to_numeric(st.session_state.new_parts["inventory"], errors="coerce").fillna(0).astype(int)
+    st.session_state.new_parts["forecast"] = pd.to_numeric(st.session_state.new_parts["forecast"], errors="coerce").fillna(0)
+
     st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
     st.success(f"✅ Part {new_sku} added!")
 
@@ -93,6 +97,11 @@ if uploaded_csv:
         imported["rolling_std"] = None
         imported["category"] = "Uncategorized"
         st.session_state.new_parts = pd.concat([st.session_state.new_parts, imported], ignore_index=True)
+
+        #correct numeric columns
+        st.session_state.new_parts["inventory"] = pd.to_numeric(st.session_state.new_parts["inventory"], errors="coerce").fillna(0).astype(int)
+        st.session_state.new_parts["forecast"] = pd.to_numeric(st.session_state.new_parts["forecast"], errors="coerce").fillna(0)
+
         st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
         st.success(f"✅ {len(imported)} parts added from CSV!")
 
