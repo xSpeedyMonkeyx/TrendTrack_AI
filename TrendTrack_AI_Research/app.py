@@ -50,6 +50,7 @@ page = st.sidebar.radio("Go to", ["Dashboard", "Forecasts", "Events/Logs", "Sett
 # Add New Part Form
 st.sidebar.subheader("➕ Add New Part")
 with st.sidebar.form("add_part_form"):
+    new_manufacturer = st.text_input("Manufacturer")
     new_sku = st.text_input("SKU / Part ID")
     new_name = st.text_input("Part Name")
     new_qty = st.number_input("Inventory", min_value=0, step=1)
@@ -58,6 +59,7 @@ with st.sidebar.form("add_part_form"):
     
 if submit:
     new_row = pd.DataFrame([{
+        "manufacturer": new_manufacturer,
         "product_id": new_sku,
         "product_name": new_name,
         "inventory": new_qty,
@@ -83,12 +85,13 @@ uploaded_csv = st.sidebar.file_uploader("Upload a CSV of parts", type=["csv"])
 if uploaded_csv:
     uploaded_df = pd.read_csv(uploaded_csv)
     st.sidebar.markdown("### Map CSV Columns")
+    manu_col = st.sidebar.selectbox("Select Manufacturer Column", uploaded_df.columns)
     sku_col = st.sidebar.selectbox("Select SKU Column", uploaded_df.columns)
     name_col = st.sidebar.selectbox("Select Part Name Column", uploaded_df.columns)
     qty_col = st.sidebar.selectbox("Select Inventory Column", uploaded_df.columns)
     if st.sidebar.button("Add Parts from CSV"):
-        imported = uploaded_df[[sku_col, name_col, qty_col]].copy()
-        imported.columns = ["product_id", "product_name", "inventory"]
+        imported = uploaded_df[[sku_col, name_col, qty_col, manu_col]].copy()
+        imported.columns = ["product_id", "product_name", "inventory", "manufacturer"]
         imported["date"] = pd.to_datetime("today").normalize()
         imported["forecast"] = 0
         imported["anomaly"] = False
@@ -96,6 +99,7 @@ if uploaded_csv:
         imported["rolling_mean"] = None
         imported["rolling_std"] = None
         imported["category"] = "Uncategorized"
+        imported["manufacturer"] = imported["manufacturer"].fillna("Unknown")
         st.session_state.new_parts = pd.concat([st.session_state.new_parts, imported], ignore_index=True)
 
         #correct numeric columns
@@ -117,7 +121,7 @@ delete_clicked = st.sidebar.button("🗑️ Delete ALL SKU's", type="primary")
 if delete_clicked:
     if delete_confirm.strip().lower() == "confirm":
         st.session_state.new_parts = pd.DataFrame(columns=[
-            "product_id", "product_name", "inventory", "date", "forecast",
+            "manufacturer", "product_id", "product_name", "inventory", "date", "forecast",
             "anomaly", "z_score", "rolling_mean", "rolling_std", "category"
         ])
         st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
@@ -247,6 +251,7 @@ elif page == "Forecasts":
     else:
         unique_skus = df["product_id"].unique()
         selected_sku = st.selectbox("Choose SKU for Forecast View", unique_skus)
+        selected_part = df[df["product_id"] == selected_sku].iloc[0]
         sku_df = df[df["product_id"] == selected_sku].copy()
         sku_df["date"] = pd.to_datetime(sku_df["date"])
         sku_df = sku_df.sort_values("date")
@@ -260,6 +265,26 @@ elif page == "Forecasts":
         )
 
         st.caption("Shows actual inventory and 7-day moving average forecast for trend tracking.")
+        
+        from news_util import fetch_manufacturer_headlines
+
+        from news_util import fetch_manufacturer_headlines
+
+        # Manufacturer News snippets
+        st.subheader("📰 Latest Manufacturer News")
+        manu = selected_part.get("manufacturer", "")
+        if manu:
+            df_news = fetch_manufacturer_headlines(manu)
+            if not df_news.empty:
+                for _, row in df_news.iterrows():
+                    st.markdown(f"**{row['title']}** — _{row['source']}_ ({row['publishedAt'][:10]})")
+                    st.markdown(f"[Read full article]({row['url']})")
+            else:
+                st.info(f"No recent news found for manufacturer: {manu}")
+        else:
+            st.info("No manufacturer is defined for this part.")
+
+
 
 # Events / Logs
 elif page == "Events/Logs":
