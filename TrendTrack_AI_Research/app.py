@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 from trends_util import fetch_trend_data
+from news_util import fetch_manufacturer_headlines
 import json
 import numpy as np
 
@@ -22,17 +23,19 @@ SETTINGS_FILE = "settings.json"
 # Confirm new_parts.csv exists
 if not Path(NEW_PARTS_CSV).exists():
     pd.DataFrame(columns=[
-        "product_id", "product_name", "inventory", "date", "forecast",
+        "manufacturer", "product_id", "product_name", "inventory", "date", "forecast",
         "anomaly", "z_score", "rolling_mean", "rolling_std", "category"
     ]).to_csv(NEW_PARTS_CSV, index=False)
 
 # Load part data
 if "new_parts" not in st.session_state:
     st.session_state.new_parts = pd.read_csv(NEW_PARTS_CSV)
-    if "category" not in st.session_state.new_parts.columns:
-        st.session_state.new_parts["category"] = "Uncategorized"
     if "date" in st.session_state.new_parts.columns:
         st.session_state.new_parts["date"] = pd.to_datetime(st.session_state.new_parts["date"])
+    if "category" not in st.session_state.new_parts.columns:
+        st.session_state.new_parts["category"] = "Uncategorized"
+    if "manufacturer" not in st.session_state.new_parts.columns:
+        st.session_state.new_parts["manufacturer"] = "Unknown"
 
 # Load settings
 if not Path(SETTINGS_FILE).exists():
@@ -56,7 +59,7 @@ with st.sidebar.form("add_part_form"):
     new_qty = st.number_input("Inventory", min_value=0, step=1)
     new_category = st.selectbox("Category", CATEGORY_OPTIONS)
     submit = st.form_submit_button("Add Part")
-    
+
 if submit:
     new_row = pd.DataFrame([{
         "manufacturer": new_manufacturer,
@@ -102,23 +105,16 @@ if uploaded_csv:
         imported["manufacturer"] = imported["manufacturer"].fillna("Unknown")
         st.session_state.new_parts = pd.concat([st.session_state.new_parts, imported], ignore_index=True)
 
-        #correct numeric columns
         st.session_state.new_parts["inventory"] = pd.to_numeric(st.session_state.new_parts["inventory"], errors="coerce").fillna(0).astype(int)
         st.session_state.new_parts["forecast"] = pd.to_numeric(st.session_state.new_parts["forecast"], errors="coerce").fillna(0)
 
         st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
         st.success(f"✅ {len(imported)} parts added from CSV!")
 
-        st.sidebar.markdown("---")
-
-#Delete all SKU's option
+# Danger Zone = Delete all Parts
 st.sidebar.markdown("#### 🚨 Danger Zone: Delete All Parts")
-st.sidebar.warning("This will permanently delete all SKU's from your inventory.")
-
 delete_confirm = st.sidebar.text_input("Type 'confirm' to enable delete", key="delete_all_confirm")
-delete_clicked = st.sidebar.button("🗑️ Delete ALL SKU's", type="primary")
-
-if delete_clicked:
+if st.sidebar.button("🗑️ Delete ALL SKU's", type="primary"):
     if delete_confirm.strip().lower() == "confirm":
         st.session_state.new_parts = pd.DataFrame(columns=[
             "manufacturer", "product_id", "product_name", "inventory", "date", "forecast",
@@ -129,7 +125,7 @@ if delete_clicked:
     else:
         st.sidebar.error("❌ Type 'confirm' to proceed with deleting all SKU's")
 
-# Dashboard
+# Dashboard Page
 if page == "Dashboard":
     st.title("📦 TrendTrack AI Inventory Dashboard")
     df = st.session_state.new_parts.copy()
@@ -145,107 +141,68 @@ if page == "Dashboard":
     if not df.empty:
         df["stockout_date"] = df.apply(estimate_stockout_date, axis=1)
         df["reorder_qty"] = df.apply(suggest_reorder_qty, axis=1)
-    else:
-        df["stockout_date"] = []
-        df["reorder_qty"] = []
-
-    if df.empty:
-        st.warning("No data available.")
-    else:
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total SKUs Tracked", df['product_id'].nunique())
-        col2.metric("Detected Anomalies", int(df['anomaly'].sum()))
-        col3.metric("Avg Forecasted Sales", round(df['forecast'].mean(), 2))
-        col4.metric("At-Risk Stockouts", df[df['forecast'] < df['inventory']].shape[0])
-
 
         st.subheader("📋 Inventory Overview")
-        source_df = st.session_state.get("filtered_df", df)
 
-        st.data_editor(
-            source_df[["product_id", "product_name", "inventory", "forecast", "stockout_date", "reorder_qty", "date"]].rename(columns={
-                "product_id": "SKU",
-                "product_name": "Product Name",
-                "inventory": "Quantity",
-                "forecast": "Forecast",
-                "stockout_date": "Est. Stockout",
-                "reorder_qty": "Reorder Qty",
-                "date": "Date"
-            }), use_container_width=True, hide_index=True
+        editable_cols = ["inventory", "forecast"]
+        display_cols = ["product_id", "product_name", "manufacturer", "inventory", "forecast", "stockout_date", "reorder_qty", "date"]
+
+        edited_df = st.data_editor(
+            df[display_cols],
+            column_config={
+                "inventory": st.column_config.NumberColumn("Inventory", step=1),
+                "forecast": st.column_config.NumberColumn("Forecast", step=1),
+            },
+            hide_index=True,
+            use_container_width=True,
+            key="editable_inventory"
         )
-        
 
+        # Save back to session and file if changes are detected
+        if not edited_df.equals(df[display_cols]):
+            for col in editable_cols:
+                st.session_state.new_parts[col] = edited_df[col]
+            st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
+            st.success("✅ Inventory and forecast values updated!")
 
-        # Category Filter
+        selected_index = st.selectbox("Select a row to view trends:", range(len(df)), format_func=lambda i: f"{df.iloc[i]['product_id']} - {df.iloc[i]['product_name']}")
+        selected_part = df.iloc[selected_index]
+
+        st.subheader(f"📈 Inventory vs Google Trends for {selected_part['product_id']}")
+        trends_sku = fetch_trend_data(selected_part["product_id"])
+        trends_name = fetch_trend_data(selected_part["product_name"])
+        inventory_history = df[df["product_id"] == selected_part["product_id"]].copy()
+        inventory_history["date"] = pd.to_datetime(inventory_history["date"])
+        inventory_history = inventory_history.sort_values("date")
+
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(inventory_history["date"], inventory_history["inventory"], label="Inventory", color="blue")
+        if not trends_sku.empty:
+            ax.plot(trends_sku.index, trends_sku[selected_part["product_id"]], label=f"Search: {selected_part['product_id']}", color="green")
+        if not trends_name.empty:
+            ax.plot(trends_name.index, trends_name[selected_part["product_name"]], label=f"Search: {selected_part['product_name']}", color="orange")
+        ax.set_title("Inventory vs Google Trends")
+        ax.set_xlabel("Date")
+        ax.set_ylabel("Value")
+        ax.legend()
+        ax.grid(True)
+        ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter("%b %Y"))
+        st.pyplot(fig)
+
         with st.expander("🔍 Filter Inventory by Category", expanded=False):
             unique_categories = df["category"].dropna().unique()
-            
             if len(unique_categories) > 0:
                 selected_category = st.selectbox("Select Category", unique_categories)
                 if st.button("Apply Filter"):
                     st.session_state.filtered_df = df[df["category"] == selected_category]
                 if st.button("Clear Filter"):
                     st.session_state.pop("filtered_df", None)
-            else:
-                st.write("No categories available.")
 
-        source_df["sku_display"] = source_df["product_id"] + " — " + source_df["product_name"]
-        display_to_sku = dict(zip(source_df["sku_display"], source_df["product_id"]))
-        selected_display = st.selectbox("Select a SKU", source_df["sku_display"])
-        selected_sku = display_to_sku[selected_display]
-        selected_part = df[df["product_id"] == selected_sku].iloc[0]
-
-        st.subheader("🛠️ Manage Selected Part")
-        new_qty = st.number_input(f"Adjust Inventory for {selected_part['product_id']}", value=int(selected_part["inventory"]), step=1)
-        col_a, col_b = st.columns(2)
-        if col_a.button("Update Inventory"):
-            st.session_state.new_parts.loc[
-                st.session_state.new_parts["product_id"] == selected_part["product_id"], "inventory"
-            ] = new_qty
-            st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
-            st.success("Inventory updated.")
-        if col_b.button("❌ Delete SKU"):
-            st.session_state.new_parts = st.session_state.new_parts[
-                st.session_state.new_parts["product_id"] != selected_part["product_id"]
-            ]
-            st.session_state.new_parts.to_csv(NEW_PARTS_CSV, index=False)
-            st.success("SKU deleted.")
-
-        st.subheader("📈 Inventory vs Google Trends")
-
-        trends_sku = fetch_trend_data(selected_part["product_id"])
-        trends_name = fetch_trend_data(selected_part["product_name"])
-        inventory_history = df[df["product_id"] == selected_part["product_id"]].copy()
-
-        if not trends_sku.empty or not trends_name.empty:
-            inventory_history["date"] = pd.to_datetime(inventory_history["date"])
-            inventory_history = inventory_history.sort_values("date")
-
-            fig, ax = plt.subplots(figsize=(10, 4))
-            ax.plot(inventory_history["date"], inventory_history["inventory"], label="Inventory", color="blue")
-
-            if not trends_sku.empty:
-                ax.plot(trends_sku.index, trends_sku[selected_part["product_id"]],
-                        label=f"Search: {selected_part['product_id']}", color="green")
-            if not trends_name.empty:
-                ax.plot(trends_name.index, trends_name[selected_part["product_name"]],
-                        label=f"Search: {selected_part['product_name']}", color="orange")
-
-            ax.set_title("Inventory vs Google Trends")
-            ax.set_xlabel("Date")
-            ax.set_ylabel("Value")
-            ax.legend()
-            ax.grid(True)
-            ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter("%b %Y"))
-            st.pyplot(fig)
-        else:
-            st.info(f"No Google Trends data found for: {selected_part['product_id']} or {selected_part['product_name']}")
-
-# Forecasts
+# Forecasts Page
 elif page == "Forecasts":
     st.title("🔮 Forecast Output (7-Day Moving Average)")
-
     df = st.session_state.new_parts.copy()
+
     if df.empty:
         st.warning("No parts data available.")
     else:
@@ -255,7 +212,6 @@ elif page == "Forecasts":
         sku_df = df[df["product_id"] == selected_sku].copy()
         sku_df["date"] = pd.to_datetime(sku_df["date"])
         sku_df = sku_df.sort_values("date")
-
         sku_df["7_day_ma"] = sku_df["inventory"].rolling(window=7, min_periods=1).mean()
 
         st.line_chart(
@@ -264,15 +220,8 @@ elif page == "Forecasts":
             height=350
         )
 
-        st.caption("Shows actual inventory and 7-day moving average forecast for trend tracking.")
-        
-        from news_util import fetch_manufacturer_headlines
-
-        from news_util import fetch_manufacturer_headlines
-
-        # Manufacturer News snippets
         st.subheader("📰 Latest Manufacturer News")
-        manu = selected_part.get("manufacturer", "")
+        manu = selected_part["manufacturer"]
         if manu:
             df_news = fetch_manufacturer_headlines(manu)
             if not df_news.empty:
@@ -284,9 +233,7 @@ elif page == "Forecasts":
         else:
             st.info("No manufacturer is defined for this part.")
 
-
-
-# Events / Logs
+# Events / Logs Page
 elif page == "Events/Logs":
     st.title("📋 Anomaly Logs")
     df = st.session_state.new_parts
@@ -299,7 +246,7 @@ elif page == "Events/Logs":
         else:
             st.info("✅ No anomalies detected.")
 
-# Settings 
+# Settings Page
 elif page == "Settings":
     st.title("⚙️ Settings")
     st.subheader("Z-Score Threshold")
